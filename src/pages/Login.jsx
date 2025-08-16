@@ -1,0 +1,198 @@
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import Cookies from "js-cookie";
+import { useMutation } from "@tanstack/react-query";
+import { message } from "antd";
+
+import { loginUser, signByGoogle } from "@/Util/Https/http";
+import { useAuth } from "@/context/AuthContext";
+
+import InputFelid from "../UI/InputFelid";
+import ButtonFelid from "../UI/ButtonFelid";
+import Loading from "./Loading";
+import { useEffect, useState } from "react";
+import { googleColor } from "@/assets/paths";
+import { GetCurrentSubscription } from "@/Util/Https/companyHttp";
+
+export default function Login() {
+  const [messageApi, contextHolder] = message.useMessage();
+
+  const { user, login } = useAuth();
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { from, message: loginAlert } = location.state || {};
+  const { mutate, data, isPending } = useMutation({
+    mutationFn: loginUser,
+    onMutate: () => {
+      messageApi.loading({
+        content: "Login...",
+        key: "login",
+      });
+    },
+    onSuccess: async (data) => {
+      Cookies.set("token", data.token, {
+        expires: 7,
+        secure: true,
+        sameSite: "Strict",
+      });
+      login({
+        userId: data.userId,
+        role: data.role,
+        token: data.token,
+        refreshToken: data.refreshToken,
+      });
+
+      try {
+        if (data.role == "CompanyAdmin") {
+          await GetCurrentSubscription({
+            companyId: data.userId,
+            token: data.token,
+          });
+        }
+
+        if (data.role === "admin") {
+          navigate("/admin/dashboard");
+        } else if (from) {
+          navigate(from);
+        } else {
+          navigate("/user/dashboard");
+        }
+      } catch (err) {
+        console.error("Subscription error:", err);
+        navigate(`/select-plan/${data.token}`);
+      }
+    },
+    onError: (error) => {
+      if (error?.message == "Error checking subscription.") {
+        navigate(`/select-plan/${data.token}`);
+      } else {
+        messageApi.error({
+          content: error?.message || "Login failed!",
+          key: "login",
+        });
+        setError(error.message);
+      }
+    },
+  });
+  const {
+    mutate: signGoogle,
+    data: googleData,
+    isPending: googlePending,
+  } = useMutation({
+    mutationFn: signByGoogle,
+    onMutate: () => {
+      messageApi.loading({
+        content: "Google login...",
+        key: "googleLogin",
+      });
+    },
+    onSuccess: (data) => {
+      if (from) {
+        console.log(from);
+        navigate(from);
+      }
+      console.log("Google login data:", data);
+    },
+    onError: (error) => {
+      messageApi.error({
+        content: error?.message || "Google login failed!",
+        key: "googleLogin",
+      });
+      setError(error.message);
+    },
+  });
+
+  const {
+    control,
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm({
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
+
+  useEffect(() => {
+    if (from) {
+      message.info(loginAlert);
+    }
+    if (user.token) {
+      if (user.role === "admin") navigate("/admin/dashboard");
+      else if (from) navigate(from);
+      else navigate("/user/dashboard");
+    }
+  }, [user, from, loginAlert, navigate]);
+
+  const formData = watch();
+
+  const onSubmit = () => {
+    mutate({ data: formData });
+  };
+
+  if (isPending) return <Loading />;
+
+  return (
+    <>
+      {contextHolder}
+      <div className="rounded bg-[#fff] bg-opacity-[50%] backdrop-blur-[50px] p-[30px] md:p-[50px]  font-roboto-condensed text-center shadow">
+        <div className="title font-extrabold text-[40px] md:text-4xl">
+          Login to your account
+        </div>
+        <div className="subTitle text-[17px] font-light text-sm m-5">
+          Don't have an account?{" "}
+          <Link className="text-[#6C63FF] font-semibold" to="sign-up">
+            Sign Up
+          </Link>
+        </div>
+        <div>
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <InputFelid
+              title="Email"
+              name="email"
+              requires={["Email required"]}
+              placeholder="Enter your email address"
+              type="text"
+              classes="min-w-[300px] text-[16px] outline-none border-[1px] border-[#D6D7D7] rounded p-2 w-full focus:border-[#CC99FF] focus:ring-1 focus:ring-[#CC99FF]"
+              control={control}
+              errors={errors}
+            />
+            <InputFelid
+              title="Password"
+              name="password"
+              type="password"
+              control={control}
+              errors={errors}
+              placeholder="Enter your password"
+              requires={["password is required"]}
+              classes="min-w-[300px] text-[16px] outline-none border-[1px] border-[#D6D7D7] rounded p-2 w-full focus:border-[#CC99FF] focus:ring-1 focus:ring-[#CC99FF]"
+            />
+            <div className="text-left border-b border-black w-fit">
+              <Link to="forget-password">Forgot Password?</Link>
+            </div>
+            <div className="flex items-center mt-[40px]">
+              <ButtonFelid
+                text="Log in"
+                classes="px-[60px] py-[7px] bg-second-color m-auto"
+                type="submit"
+              />
+              <button
+                type="button"
+                onClick={() => signGoogle()}
+                className="h-fit w-fit mx-auto flex rounded py-1 px-2 gap-2 font-medium"
+              >
+                <div className="w-8 h-8 bg-white rounded-md flex items-center justify-center">
+                  <img src={googleColor} alt="google color" className="w-5 " />
+                </div>
+                <p className="border-b-2 border-black">Sign in with Google</p>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
